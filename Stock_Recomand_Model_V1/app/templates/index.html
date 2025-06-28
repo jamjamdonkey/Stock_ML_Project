@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>종목 추천 시스템</title>
+</head>
+<body>
+    <h1>🔍 KOSPI 종목 추천 시스템 (V2)</h1>
+
+    <form method="post" action="/run_model">
+        <button type="submit">모델 실행 (크롤링 → 예측)</button>
+    </form>
+
+    {% if result %}
+        <hr>
+        <h2>📊 예측 결과</h2>
+        <div>{{ result|safe }}</div>  <!-- 핵심: safe 필터 -->
+    {% endif %}
+</body>
+</html>
