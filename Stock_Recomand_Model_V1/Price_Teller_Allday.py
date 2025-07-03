@@ -1,19 +1,20 @@
 import os
+import time
 import pandas as pd
+import numpy as np
 import requests
 from bs4 import BeautifulSoup
 from io import StringIO
-import time
-
-# 종목명 딕셔너리 불러오기
 from Stock_Name import stock_name_dict
 
-# 현재 파일 기준 절대 경로 설정
+# ====== 경로 설정 ====== #
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-recommand_path = os.path.join(BASE_DIR, "Top5_Recommanded.csv")
-output_path = os.path.join(BASE_DIR, "Top5_Price_Indicators_Comment.csv")
+path_3d = os.path.join(BASE_DIR, "Top10_Recommanded_3D.csv")
+path_7d = os.path.join(BASE_DIR, "Top10_Recommanded_7D.csv")
+path_14d = os.path.join(BASE_DIR, "Top10_Recommanded_14D.csv")
+output_path = os.path.join(BASE_DIR, "Triple_Confirmed_Price_Indicators.csv")
 
-# 보조지표 계산 함수
+# ====== 보조지표 계산 함수 ====== #
 def calc_indicators(df):
     df = df.sort_values('날짜').copy()
     df['MA_20'] = df['종가'].rolling(20).mean()
@@ -34,7 +35,7 @@ def calc_indicators(df):
     df['VOL_MA_5'] = df['거래량'].rolling(window=5).mean()
     return df
 
-# 진단 코멘트 함수
+# ====== 진단 코멘트 함수 ====== #
 def generate_comment(df):
     row = df.iloc[-1]
     comments = []
@@ -76,7 +77,7 @@ def generate_comment(df):
 
     return " ".join(comments)
 
-# 크롤링 함수
+# ====== 시세 크롤링 함수 ====== #
 def get_recent_prices(code, days=60):
     base_url = f"https://finance.naver.com/item/sise_day.nhn?code={code}"
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -88,7 +89,6 @@ def get_recent_prices(code, days=60):
         if page > MAX_PAGE:
             print(f"{code}: 페이지 {MAX_PAGE} 초과. 중단")
             break
-
         url = f"{base_url}&page={page}"
         try:
             res = requests.get(url, headers=headers, timeout=5)
@@ -96,11 +96,9 @@ def get_recent_prices(code, days=60):
             table = soup.find("table", class_="type2")
             tables = pd.read_html(StringIO(str(table)), match="날짜")
             if not tables:
-                print(f"{code}: 테이블 파싱 실패")
                 break
             df = tables[0]
             if df.shape[1] < 6:
-                print(f"{code}: 칼럼 수 부족")
                 break
             df = df.dropna(subset=["날짜", "종가", "시가", "고가", "저가", "거래량"])
         except Exception as e:
@@ -119,62 +117,63 @@ def get_recent_prices(code, days=60):
     except:
         return pd.DataFrame()
 
-    if len(df_total) < 40:
-        print(f"{code}: 수집된 데이터 부족. 건너뜀.")
-        return pd.DataFrame()
+    return df_total.tail(days).reset_index(drop=True) if len(df_total) >= 40 else pd.DataFrame()
 
-    return df_total.tail(days).reset_index(drop=True)
+# ====== 교집합 종목코드 추출 ====== #
+df_3d = pd.read_csv(path_3d, encoding='utf-8-sig')
+df_7d = pd.read_csv(path_7d, encoding='utf-8-sig')
+df_14d = pd.read_csv(path_14d, encoding='utf-8-sig')
 
-# 종목코드 로딩
-try:
-    top_df = pd.read_csv(recommand_path, encoding='utf-8-sig')
-    top_codes = top_df['종목코드'].astype(str).apply(lambda x: x.zfill(6)).tolist()
-except Exception as e:
-    print(f"Top5_Recommanded.csv 로딩 실패: {e}")
-    exit()
+codes_3d = df_3d['종목코드'].astype(str).str.zfill(6)
+codes_7d = df_7d['종목코드'].astype(str).str.zfill(6)
+codes_14d = df_14d['종목코드'].astype(str).str.zfill(6)
 
-# 실행
-result_rows = []
+common_codes = set(codes_3d) & set(codes_7d) & set(codes_14d)
 
-for code in top_codes:
-    print(f"{code} 처리 중...")
-    df = get_recent_prices(code, days=60)
-    if df.empty:
-        print(f"{code}: 시세 없음 또는 데이터 부족. 건너뜀.")
-        continue
+# ====== 분석 실행 ====== #
+if common_codes:
+    print("🔁 세 기간 모두 추천한 종목이 있습니다.")
+    print("공통 종목코드:", list(common_codes))
 
-    df = calc_indicators(df)
-    latest = df.iloc[-1]
-    comment = generate_comment(df)
+    result_rows = []
+    for code in common_codes:
+        print(f"{code} 분석 중...")
+        df = get_recent_prices(code, days=60)
+        if df.empty:
+            print(f"{code}: 데이터 부족. 건너뜀.")
+            continue
 
-    row = {
-        '종목코드': code,
-        '종목명': stock_name_dict.get(code, "종목명 미상"),  # ⬅ 추가됨
-        '날짜': latest['날짜'].date(),
-        '종가': latest['종가'],
-        'RSI_14': round(latest['RSI_14'], 2),
-        'ATR_14': round(latest['ATR_14'], 2),
-        'MA_20': round(latest['MA_20'], 2),
-        'EMA_20': round(latest['EMA_20'], 2),
-        'BB_UPPER': round(latest['BB_UPPER'], 2),
-        'BB_LOWER': round(latest['BB_LOWER'], 2),
-        'VOL_MA_5': int(latest['VOL_MA_5']),
-        '진단': comment
-    }
+        df = calc_indicators(df)
+        latest = df.iloc[-1]
+        comment = generate_comment(df)
 
-    result_rows.append(row)
+        row = {
+            '종목코드': code,
+            '종목명': stock_name_dict.get(code, "종목명 미상"),
+            '날짜': latest['날짜'].date(),
+            '종가': latest['종가'],
+            'RSI_14': round(latest['RSI_14'], 2),
+            'ATR_14': round(latest['ATR_14'], 2),
+            'MA_20': round(latest['MA_20'], 2),
+            'EMA_20': round(latest['EMA_20'], 2),
+            'BB_UPPER': round(latest['BB_UPPER'], 2),
+            'BB_LOWER': round(latest['BB_LOWER'], 2),
+            'VOL_MA_5': int(latest['VOL_MA_5']),
+            '진단': comment
+        }
 
-# 최종 CSV 저장
-if result_rows:
-    final_df = pd.DataFrame(result_rows)
-    final_df.to_csv(output_path, index=False, encoding='utf-8-sig')
-    print(f"Top10_Price_Indicators_Comment.csv 저장 완료")
+        result_rows.append(row)
 
-    # 전체 진단 결과 요약:
-    print("전체 진단 결과 요약:")
-    for row in result_rows:
-        print(f"{row['종목코드']} ({row['종목명']}) | {row['날짜']} | 종가: {row['종가']}")
-        print(f"진단: {row['진단']}")
-        print("-" * 80)
+    if result_rows:
+        final_df = pd.DataFrame(result_rows)
+        final_df.to_csv(output_path, index=False, encoding='utf-8-sig')
+        print(f"\n✅ Triple_Confirmed_Price_Indicators.csv 저장 완료")
+
+        for row in result_rows:
+            print(f"{row['종목코드']} ({row['종목명']}) | {row['날짜']} | 종가: {row['종가']}")
+            print(f"진단: {row['진단']}")
+            print("-" * 80)
+    else:
+        print("⚠️ 공통 종목 중 진단 가능한 데이터가 없습니다.")
 else:
-    print("저장할 결과가 없습니다.")
+    print("❌ 공통 추천 종목이 없습니다. 분석을 건너뜁니다.")

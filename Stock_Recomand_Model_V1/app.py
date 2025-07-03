@@ -1,8 +1,8 @@
 from flask import Flask, render_template, request
 import os
 import pandas as pd
-from Auto_Upgrade_Crawling import run_crawling
-from Recommand_Final_Tuning_Result import run_prediction
+from Stock_Recomand_Model_V1.Auto_Upgrade_3DCrawling import run_crawling
+from Stock_Recomand_Model_V1.Recommand_Final_Tuning_3DResult import run_prediction
 from Price_Teller import run_price_analysis
 
 # Flask 앱 객체 생성

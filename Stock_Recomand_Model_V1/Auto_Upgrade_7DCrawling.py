@@ -11,10 +11,10 @@ from tqdm import tqdm
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # 저장 경로 설정
-learn_path = os.path.join(BASE_DIR, "Learn.csv")
-input_path = os.path.join(BASE_DIR, "Input.csv")
+learn_path = os.path.join(BASE_DIR, "Learn_7d.csv")
+input_path = os.path.join(BASE_DIR, "Input_7d.csv")
 
-# KOSPI 시가총액 상위 50개 종목 코드
+# KOSPI 시가총액 상위 50개 종목 코드 (예시로 일부만 명시)
 stock_codes = [
     "005930", "000660", "207940", "373220", "035420", "034020", "105560", "012450", "005380", "329180",
     "005935", "000270", "068270", "035720", "055550", "009540", "028260", "042660", "012330", "032830",
@@ -24,7 +24,7 @@ stock_codes = [
 ]
 
 # 주가 데이터 크롤링 함수
-def get_recent_prices(code, days=60):
+def get_recent_prices(code, days=90):
     base_url = f"https://finance.naver.com/item/sise_day.nhn?code={code}"
     headers = {'User-Agent': 'Mozilla/5.0'}
     df_total = pd.DataFrame()
@@ -62,35 +62,35 @@ def add_single_day_features(row):
     row['volume_price'] = row['종가'] * row['거래량']
     return row
 
-# 학습용 Learn.csv 생성 (1~53일)
+# 학습용 Learn_7d.csv 생성
 def generate_training_set(recent_data, output_path):
     feature_rows = []
 
     for code in stock_codes:
         df = recent_data.get(code)
-        if df is None or len(df) < 15:
+        if df is None or len(df) < 20:
             continue
 
         df = df.sort_values("날짜").reset_index(drop=True)
         df = df.apply(add_single_day_features, axis=1)
 
-        for i in range(len(df) - 10):
+        for i in range(len(df) - 14):  # 7 + 7
             window = df.iloc[i:i+7]
-            future = df.iloc[i+7:i+10]
+            future = df.iloc[i+7:i+14]
 
             closes = window['종가'].values
             future_close = future['종가'].values
 
-            if len(future_close) < 3:
+            if len(future_close) < 7:
                 continue
 
-            return_3d = (future_close[-1] - closes[-1]) / closes[-1]
-            target = 1 if return_3d > 0 else 0
+            return_7d = (future_close[-1] - closes[-1]) / closes[-1]
+            target = 1 if return_7d > 0 else 0
 
             row = {
                 '종목코드': code,
                 '날짜': window.iloc[-1]['날짜'],
-                'future_return_3d': return_3d,
+                'future_return_7d': return_7d,
                 'target': target
             }
 
@@ -100,7 +100,7 @@ def generate_training_set(recent_data, output_path):
             row['mean_close'] = np.mean(closes)
             row['std_close'] = np.std(closes)
             row['return_1d'] = (closes[-1] - closes[-2]) / closes[-2]
-            row['return_3d'] = (closes[-1] - closes[-4]) / closes[-4]
+            row['return_7d'] = (closes[-1] - closes[0]) / closes[0]
             row['num_up_days'] = sum(closes[j] > closes[j-1] for j in range(1, 7))
 
             last_day_feat = window.iloc[-1].copy()
@@ -111,7 +111,7 @@ def generate_training_set(recent_data, output_path):
     final_df.to_csv(output_path, index=False, encoding='utf-8-sig')
     print(f"학습용 저장 완료: {output_path} ({len(final_df)} rows)")
 
-# 예측용 Input.csv 생성 (54~60일)
+# 예측용 Input_7d.csv 생성
 def generate_today_input(recent_data, output_path):
     feature_rows = []
 
@@ -139,7 +139,7 @@ def generate_today_input(recent_data, output_path):
         row['mean_close'] = np.mean(closes)
         row['std_close'] = np.std(closes)
         row['return_1d'] = (closes[-1] - closes[-2]) / closes[-2]
-        row['return_3d'] = (closes[-1] - closes[-4]) / closes[-4]
+        row['return_7d'] = (closes[-1] - closes[0]) / closes[0]
         row['num_up_days'] = sum(closes[j] > closes[j-1] for j in range(1, 7))
 
         last_day_feat = window.iloc[-1].copy()
@@ -156,13 +156,12 @@ if __name__ == "__main__":
     recent_data_dict = {}
     for code in tqdm(stock_codes):
         try:
-            recent_data_dict[code] = get_recent_prices(code, days=60)
+            recent_data_dict[code] = get_recent_prices(code, days=90)
         except Exception as e:
             print(f"오류 {code}: {e}")
 
-    # 슬라이스 분리: 1~53일 → 학습 / 54~60일 → 입력
-    recent_data_1_53 = {code: df.iloc[:53].copy() for code, df in recent_data_dict.items() if len(df) >= 60}
-    recent_data_54_60 = {code: df.iloc[53:].copy() for code, df in recent_data_dict.items() if len(df) >= 60}
+    recent_data_train = {code: df.iloc[:76].copy() for code, df in recent_data_dict.items() if len(df) >= 90}
+    recent_data_input = {code: df.iloc[76:].copy() for code, df in recent_data_dict.items() if len(df) >= 90}
 
-    generate_training_set(recent_data_1_53, learn_path)
-    generate_today_input(recent_data_54_60, input_path)
+    generate_training_set(recent_data_train, learn_path)
+    generate_today_input(recent_data_input, input_path)
